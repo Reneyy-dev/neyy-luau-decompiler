@@ -11,8 +11,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      RUSTC_BOOTSTRAP: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@1.98.1
       - name: Run luau-lifter tests
         run: cargo test -p luau-lifter -- --nocapture
