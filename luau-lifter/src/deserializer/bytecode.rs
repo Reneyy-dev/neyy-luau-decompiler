@@ -27,3 +27,38 @@ impl Bytecode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_version_12_proto_size_envelope() {
+        // v12, types v0, no strings, one proto. The proto is prefixed by
+        // protoSize=17 and contains a single RETURN instruction.
+        let bytecode = [
+            12, 0, 0, 1, 17,
+            1, 0, 0, 0, 0,
+            0,
+            1, 0x16, 0x00, 0x01, 0x00,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ];
+
+        let (rest, parsed) = Bytecode::parse(&bytecode, 1).expect("v12 should parse");
+        assert!(rest.is_empty());
+
+        match parsed {
+            Bytecode::Chunk(chunk) => {
+                assert_eq!(chunk.functions.len(), 1);
+                assert_eq!(chunk.main, 0);
+            }
+            other => panic!("expected chunk, got {other:?}"),
+        }
+    }
+}
