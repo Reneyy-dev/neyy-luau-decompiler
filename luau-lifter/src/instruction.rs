@@ -193,3 +193,19 @@ impl Instruction {
         (insn as i32) >> 8
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_roblox_callfb_opcode() {
+        // Roblox encoding key 203: raw opcode 37 decodes to CALLFB (87).
+        let instruction = Instruction::parse(37, 203).expect("CALLFB should parse");
+
+        match instruction {
+            Instruction::BC { op_code, .. } => assert_eq!(op_code, OpCode::LOP_CALLFB),
+            other => panic!("expected BC instruction, got {other:?}"),
+        }
+    }
+}

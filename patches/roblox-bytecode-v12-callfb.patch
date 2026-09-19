@@ -1,0 +1,113 @@
+diff --git a/luau-lifter/src/deserializer/bytecode.rs b/luau-lifter/src/deserializer/bytecode.rs
+--- a/luau-lifter/src/deserializer/bytecode.rs
++++ b/luau-lifter/src/deserializer/bytecode.rs
+@@ -18,7 +18,7 @@ impl Bytecode {
+                     Bytecode::Error(String::from_utf8_lossy(error_msg).to_string()),
+                 ))
+             }
+-            4..=6 => {
++            4..=6 | 12 => {
+                 let (input, chunk) = Chunk::parse(input, encode_key, status_code)?;
+                 Ok((input, Bytecode::Chunk(chunk)))
+             }
+diff --git a/luau-lifter/src/deserializer/chunk.rs b/luau-lifter/src/deserializer/chunk.rs
+--- a/luau-lifter/src/deserializer/chunk.rs
++++ b/luau-lifter/src/deserializer/chunk.rs
+@@ -1,4 +1,5 @@
+ use super::{function::Function, list::parse_list, parse_string};
++use nom::bytes::complete::take;
+ use nom::character::complete::char;
+ use nom::multi::many_till;
+ use nom::number::complete::le_u8;
+@@ -25,7 +26,24 @@ impl Chunk {
+         } else {
+             input
+         };
+-        let (input, functions) = parse_list(input, |i| Function::parse(i, encode_key))?;
++        let (input, functions) = if version >= 12 {
++            let (mut input, function_count) = leb128_usize(input)?;
++            let mut functions = Vec::with_capacity(function_count);
++
++            for _ in 0..function_count {
++                let (next, proto_size) = leb128_usize(input)?;
++                let (next, proto_bytes) = take(proto_size)(next)?;
++                let (_, function) = Function::parse(proto_bytes, encode_key)?;
++
++                functions.push(function);
++                input = next;
++            }
++
++            (input, functions)
++        } else {
++            parse_list(input, |i| Function::parse(i, encode_key))?
++        };
+         let (input, main) = leb128_usize(input)?;
+
+         Ok((
+diff --git a/luau-lifter/src/deserializer/function.rs b/luau-lifter/src/deserializer/function.rs
+--- a/luau-lifter/src/deserializer/function.rs
++++ b/luau-lifter/src/deserializer/function.rs
+@@ -68,7 +68,8 @@ impl Function {
+                 | OpCode::LOP_JUMPXEQKNIL
+                 | OpCode::LOP_JUMPXEQKB
+                 | OpCode::LOP_JUMPXEQKN
+-                | OpCode::LOP_JUMPXEQKS => {
++                | OpCode::LOP_JUMPXEQKS
++                | OpCode::LOP_CALLFB => {
+                     let aux = vec[pc + 1];
+                     pc += 2;
+                     match ins {
+diff --git a/luau-lifter/src/instruction.rs b/luau-lifter/src/instruction.rs
+--- a/luau-lifter/src/instruction.rs
++++ b/luau-lifter/src/instruction.rs
+@@ -133,8 +133,9 @@ impl Instruction {
+             | 68
+             | 70
+             | 71..=75
+             | 81
+-            | 82 => {
++            | 82
++            | 87 => {
+                 let (a, b, c) = Self::parse_abc(insn);
+
+                 Ok(Self::BC {
+diff --git a/luau-lifter/src/op_code.rs b/luau-lifter/src/op_code.rs
+--- a/luau-lifter/src/op_code.rs
++++ b/luau-lifter/src/op_code.rs
+@@ -313,6 +313,14 @@ pub enum OpCode {
+     // C: constant table index (0..255)
+     LOP_IDIVK,
+
++    // Bytecode v11+: CALL with runtime feedback metadata.
++    // Serialized opcode value is 87; AUX stores the feedback slot.
++    //
++    // Opcodes 83..86 and 88..90 are intentionally not implemented here:
++    // this compatibility patch only adds the opcode required by the v12
++    // sample while preserving all existing legacy opcode values.
++    LOP_CALLFB = 87,
++
+     // Enum entry for number of opcodes, not a valid opcode by itself!
+-    LOP__COUNT,
++    LOP__COUNT = 91,
+ }
+diff --git a/luau-lifter/src/lifter.rs b/luau-lifter/src/lifter.rs
+--- a/luau-lifter/src/lifter.rs
++++ b/luau-lifter/src/lifter.rs
+@@ -519,7 +519,7 @@ impl<'a> Lifter<'a> {
+                         ));
+                         match iter.next().unwrap().1 {
+                             &Instruction::BC {
+-                                op_code: OpCode::LOP_CALL,
++                                op_code: OpCode::LOP_CALL | OpCode::LOP_CALLFB,
+                                 a,
+                                 b,
+                                 c,
+@@ -568,7 +568,7 @@ impl<'a> Lifter<'a> {
+                             instruction => unreachable!("{:?}", instruction),
+                         }
+                     }
+-                    OpCode::LOP_CALL => {
++                    OpCode::LOP_CALL | OpCode::LOP_CALLFB => {
+                         let arguments = if b != 0 {
+                             (a + 1..a + b)
+                                 .map(|r| self.register(r as _).into())

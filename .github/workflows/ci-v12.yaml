@@ -1,0 +1,27 @@
+name: Luau v12 CI
+
+on:
+  push:
+    branches:
+      - feature/roblox-bytecode-v12
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_BOOTSTRAP: "1"
+      RUSTUP_TOOLCHAIN: "1.98.1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+      - name: Apply Roblox compatibility patches
+        run: |
+          git apply --check --recount patches/roblox-bytecode-v12-callfb.patch
+          git apply --recount patches/roblox-bytecode-v12-callfb.patch
+          git apply --check --recount patches/constant-tag8.patch
+          git apply --recount patches/constant-tag8.patch
+      - name: Run luau-lifter tests
+        run: cargo test -p luau-lifter -- --nocapture
