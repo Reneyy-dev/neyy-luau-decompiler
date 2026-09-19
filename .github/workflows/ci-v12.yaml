@@ -17,5 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.1
+      - name: Apply Roblox compatibility patches
+        run: |
+          git apply --check patches/roblox-bytecode-v12-callfb.patch
+          git apply patches/roblox-bytecode-v12-callfb.patch
+          git apply --check patches/constant-tag8.patch
+          git apply patches/constant-tag8.patch
       - name: Run luau-lifter tests
         run: cargo test -p luau-lifter -- --nocapture
