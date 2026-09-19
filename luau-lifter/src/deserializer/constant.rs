@@ -66,3 +66,21 @@ impl Constant {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_table_with_constants_tag_8() {
+        // tag=8, one entry, key constant index=0, prefilled value index=-1
+        let input = [8, 1, 0, 0xff, 0xff, 0xff, 0xff];
+        let (rest, constant) = Constant::parse(&input).expect("tag 8 should parse");
+
+        assert!(rest.is_empty());
+        match constant {
+            Constant::Table(keys) => assert_eq!(keys, vec![0]),
+            other => panic!("expected table constant, got {other:?}"),
+        }
+    }
+}
