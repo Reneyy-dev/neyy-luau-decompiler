@@ -1,0 +1,41 @@
+name: Cloudflare Worker CI
+
+on:
+  push:
+    branches:
+      - feature/cloudflare-worker-backend
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-worker:
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_BOOTSTRAP: "1"
+      RUSTUP_TOOLCHAIN: "1.98.1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Apply Roblox compatibility patches
+        run: |
+          git apply --check --recount patches/roblox-bytecode-v12-callfb.patch
+          git apply --recount patches/roblox-bytecode-v12-callfb.patch
+          git apply --check --recount patches/constant-tag8.patch
+          git apply --recount patches/constant-tag8.patch
+
+      - name: Install worker-build
+        run: cargo install worker-build --version 0.1.4 --locked
+
+      - name: Build Cloudflare Worker
+        working-directory: luau-worker
+        run: worker-build --release
+
+      - name: Verify worker output
+        run: |
+          test -f luau-worker/build/worker/shim.mjs
+          find luau-worker/build/worker -maxdepth 2 -type f -print
