@@ -1,7 +1,7 @@
 diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
 --- a/luau-lifter/src/lib.rs
 +++ b/luau-lifter/src/lib.rs
-@@ -52,6 +52,20 @@ struct Args {
+@@ -52,6 +52,57 @@ struct Args {
      verbose: bool,
  }
  
@@ -15,6 +15,44 @@ diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
 +            chunk.main
 +        ),
 +    }
++}
++
++pub fn diagnose_lift_all(bytecode: &[u8], encode_key: u8) -> String {
++    let chunk = match deserializer::deserialize(bytecode, encode_key) {
++        Err(error) => return format!("NEY_DIAG_LIFT_DESERIALIZE_ERR {:?}", error),
++        Ok(Bytecode::Error(message)) => {
++            return format!("NEY_DIAG_LIFT_BYTECODE_ERROR {}", message)
++        }
++        Ok(Bytecode::Chunk(chunk)) => chunk,
++    };
++
++    let function_count = chunk.functions.len();
++    let main = chunk.main;
++    let mut lifted = 0usize;
++    let mut stack = vec![(Arc::<Mutex<ast::Function>>::default(), chunk.main)];
++
++    while let Some((_ast_func, func_id)) = stack.pop() {
++        lifted += 1;
++        if lifted > 512 {
++            return format!(
++                "NEY_DIAG_LIFT_TRAVERSAL_LIMIT function_id={} lifted={} pending={}",
++                func_id,
++                lifted,
++                stack.len()
++            );
++        }
++
++        let (_function, _upvalues, child_functions) =
++            Lifter::lift(&chunk.functions, &chunk.string_table, func_id);
++        stack.extend(child_functions.into_iter().map(|(a, f)| (a.0, f)));
++    }
++
++    format!(
++        "NEY_DIAG_LIFT_ALL_OK functions={} main={} lifted={}",
++        function_count,
++        main,
++        lifted
++    )
 +}
 +
  pub fn decompile_bytecode(bytecode: &[u8], encode_key: u8) -> String {
