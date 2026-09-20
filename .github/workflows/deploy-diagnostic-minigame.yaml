@@ -1,0 +1,50 @@
+name: Deploy diagnostic Minigame hang
+
+on:
+  push:
+    branches:
+      - diagnostic/minigame-hang
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_BOOTSTRAP: "1"
+      RUSTUP_TOOLCHAIN: "1.98.1"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.98.1
+        uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Apply Roblox v12 and diagnostic patches
+        run: |
+          set -euo pipefail
+          git apply --check --recount patches/roblox-bytecode-v12-callfb.patch
+          git apply --recount patches/roblox-bytecode-v12-callfb.patch
+          git apply --check --recount patches/constant-tag8.patch
+          git apply --recount patches/constant-tag8.patch
+          git apply --check --recount patches/diagnostic-minigame-hang.patch
+          git apply --recount patches/diagnostic-minigame-hang.patch
+
+      - name: Verify luau-lifter still compiles and tests
+        run: cargo test -p luau-lifter -- --nocapture
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Deploy isolated diagnostic Worker
+        working-directory: luau-worker
+        run: npx --yes wrangler@4.134.0 deploy --name neyy-luau-decompiler-diag
