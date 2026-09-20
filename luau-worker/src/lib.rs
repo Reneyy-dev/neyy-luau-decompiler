@@ -1,6 +1,6 @@
 extern crate console_error_panic_hook;
 
-use luau_lifter::{diagnose_deserialize, diagnose_lift_all};
+use luau_lifter::{diagnose_decompile_prefix, diagnose_deserialize, diagnose_lift_all};
 use worker::*;
 
 const MAX_BYTECODE_SIZE: usize = 4 * 1024 * 1024;
@@ -150,6 +150,16 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
         .post_async("/diag/lift-all", |req, _ctx| async move {
             let bytecode = body_bytes(req).await?;
             Response::ok(diagnose_lift_all(&bytecode, 203))
+        })
+        .post_async("/diag/decompile-prefix", |req, _ctx| async move {
+            let url = req.url()?;
+            let limit = url
+                .query_pairs()
+                .find(|(key, _)| key == "limit")
+                .and_then(|(_, value)| value.parse::<usize>().ok())
+                .unwrap_or(0);
+            let bytecode = body_bytes(req).await?;
+            Response::ok(diagnose_decompile_prefix(&bytecode, 203, limit))
         })
         .post_async("/decompile", |req, _ctx| async move {
             let bytecode = body_bytes(req).await?;
