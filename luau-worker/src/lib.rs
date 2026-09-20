@@ -1,6 +1,6 @@
 extern crate console_error_panic_hook;
 
-use luau_lifter::decompile_bytecode;
+use luau_lifter::diagnose_deserialize;
 use worker::*;
 
 const MAX_BYTECODE_SIZE: usize = 4 * 1024 * 1024;
@@ -10,7 +10,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
     console_error_panic_hook::set_once();
 
     Router::new()
-        .get("/health", |_req, _ctx| Response::ok("neyy-luau-decompiler ok"))
+        .get("/health", |_req, _ctx| Response::ok("neyy-luau-decompiler diagnostic deserialize"))
         .post_async("/decompile", |mut req, _ctx| async move {
             let bytecode = req.bytes().await?;
 
@@ -22,7 +22,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                 return Response::error("bytecode too large", 413);
             }
 
-            Response::ok(decompile_bytecode(&bytecode, 203))
+            Response::ok(diagnose_deserialize(&bytecode, 203))
         })
         .run(req, env)
         .await
