@@ -1,7 +1,26 @@
 diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
 --- a/luau-lifter/src/lib.rs
 +++ b/luau-lifter/src/lib.rs
-@@ -103,7 +103,7 @@ pub fn decompile_bytecode(bytecode: &[u8], encode_key: u8) -> String {
+@@ -58,8 +58,18 @@ pub fn decompile_bytecode(bytecode: &[u8], encode_key: u8) -> String {
+         Bytecode::Chunk(chunk) => {
+             let mut lifted = Vec::new();
+             let mut stack = vec![(Arc::<Mutex<ast::Function>>::default(), chunk.main)];
++            let mut diagnostic_lift_steps = 0usize;
+             while let Some((ast_func, func_id)) = stack.pop() {
++                diagnostic_lift_steps += 1;
++                if diagnostic_lift_steps > 512 {
++                    return format!(
++                        "NEY_DIAG_LIFT_TRAVERSAL_LIMIT function_id={} steps={} pending={}",
++                        func_id,
++                        diagnostic_lift_steps,
++                        stack.len()
++                    );
++                }
++
+                 let (function, upvalues, child_functions) =
+                     Lifter::lift(&chunk.functions, &chunk.string_table, func_id);
+                 lifted.push((ast_func, function, upvalues));
+@@ -103,7 +113,7 @@ pub fn decompile_bytecode(bytecode: &[u8], encode_key: u8) -> String {
  
                              let mut message = String::new();
                              writeln!(message, "failed to decompile").unwrap();
@@ -10,7 +29,7 @@ diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
                              // if let Some(backtrace) = BACKTRACE.with(|b| b.borrow_mut().take()) {
                              //     write!(message, "stack backtrace:\n{}", backtrace).unwrap();
                              // }
-@@ -157,8 +157,17 @@ fn decompile_function(
+@@ -157,8 +167,17 @@ fn decompile_function(
      // etc.
      // the macro could also maybe generate an optimal ordering?
      let mut changed = true;
