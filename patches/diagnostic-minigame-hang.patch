@@ -1,7 +1,7 @@
 diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
 --- a/luau-lifter/src/lib.rs
 +++ b/luau-lifter/src/lib.rs
-@@ -52,6 +52,57 @@ struct Args {
+@@ -52,6 +52,96 @@ struct Args {
      verbose: bool,
  }
  
@@ -52,6 +52,46 @@ diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
 +        function_count,
 +        main,
 +        lifted
++    )
++}
++
++pub fn diagnose_decompile_prefix(bytecode: &[u8], encode_key: u8, limit: usize) -> String {
++    use std::panic::{catch_unwind, AssertUnwindSafe};
++
++    let chunk = match deserializer::deserialize(bytecode, encode_key) {
++        Err(error) => return format!("NEY_DIAG_PREFIX_DESERIALIZE_ERR {:?}", error),
++        Ok(Bytecode::Error(message)) => {
++            return format!("NEY_DIAG_PREFIX_BYTECODE_ERROR {}", message)
++        }
++        Ok(Bytecode::Chunk(chunk)) => chunk,
++    };
++
++    let function_count = chunk.functions.len();
++    let limit = limit.min(function_count);
++    let mut completed = 0usize;
++    let mut panics = 0usize;
++
++    for function_id in 0..limit {
++        let ast_function = Arc::<Mutex<ast::Function>>::default();
++        let (function, upvalues, _child_functions) =
++            Lifter::lift(&chunk.functions, &chunk.string_table, function_id);
++
++        let result = catch_unwind(AssertUnwindSafe(|| {
++            decompile_function(ast_function, function, upvalues)
++        }));
++
++        if result.is_err() {
++            panics += 1;
++        }
++        completed += 1;
++    }
++
++    format!(
++        "NEY_DIAG_DECOMPILE_PREFIX_OK requested={} completed={} panics={} functions={}",
++        limit,
++        completed,
++        panics,
++        function_count
 +    )
 +}
 +
