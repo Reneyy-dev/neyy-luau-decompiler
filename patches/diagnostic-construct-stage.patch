@@ -180,22 +180,3 @@ diff --git a/cfg/src/ssa/construct.rs b/cfg/src/ssa/construct.rs
 +    }
 +    .construct_diagnostic(stage)
 +}
-+
-+diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
-+--- a/luau-lifter/src/lib.rs
-++++ b/luau-lifter/src/lib.rs
-+@@ -194,6 +194,13 @@ fn diagnose_function_stage_inner(
-+         return format!("NEY_DIAG_STAGE_OK function_id={} stage=lift", function_id);
-+     }
-+ 
-++    if stage.starts_with("construct_") {
-++        return cfg::ssa::construct::diagnose_construct_stage(
-++            &mut function,
-++            &upvalues_in,
-++            stage,
-++        );
-++    }
-++
-+     let (local_count, local_groups, upvalue_in_groups, upvalue_passed_groups) =
-+         cfg::ssa::construct(&mut function, &upvalues_in);
-+ 
