@@ -127,7 +127,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
     console_error_panic_hook::set_once();
 
     Router::new()
-        .get("/health", |_req, _ctx| Response::ok("neyy-luau-decompiler staged diagnostic"))
+        .get("/health", |_req, _ctx| Response::ok("neyy-luau-decompiler function-stage-marker-v14"))
         .post_async("/diag/strings", |req, _ctx| async move {
             let bytecode = body_bytes(req).await?;
             match parse_prefix(&bytecode, false, false) {
