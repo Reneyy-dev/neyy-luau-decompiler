@@ -47,27 +47,32 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Deploy isolated diagnostic Worker
+      - name: Deploy fresh isolated stage diagnostic Worker
         working-directory: luau-worker
-        run: npx --yes wrangler@4.134.0 deploy --name neyy-luau-decompiler-diag
+        run: npx --yes wrangler@4.134.0 deploy --name neyy-luau-decompiler-stage-diag
 
-      - name: Smoke-test deployed diagnostic route
+      - name: Smoke-test fresh diagnostic route
         run: |
           set -euo pipefail
-          URL='https://neyy-luau-decompiler-diag.apa-kah1337.workers.dev'
+          URL='https://neyy-luau-decompiler-stage-diag.apa-kah1337.workers.dev'
           sleep 5
-          echo '=== health ==='
-          curl -sS -i "$URL/health"
-          echo
-          echo '=== function-stage empty POST ==='
+
+          health="$(curl -sS "$URL/health")"
+          echo "HEALTH=$health"
+          if [ "$health" != "neyy-luau-decompiler function-stage-marker-v14" ]; then
+            echo 'ERROR: fresh Worker did not return the expected build marker'
+            exit 1
+          fi
+
           status="$(curl -sS -o /tmp/function-stage-body.txt -w '%{http_code}' \
             -X POST "$URL/diag/function-stage?id=173&stage=lift" \
             -H 'Content-Type: application/octet-stream' \
             --data-binary '')"
-          cat /tmp/function-stage-body.txt
-          echo
-          echo "HTTP=$status"
+          body="$(cat /tmp/function-stage-body.txt)"
+          echo "FUNCTION_STAGE_HTTP=$status"
+          echo "FUNCTION_STAGE_BODY=$body"
+
           if [ "$status" = "404" ]; then
-            echo 'ERROR: deployed Worker still returns 404 for /diag/function-stage'
+            echo 'ERROR: fresh Worker returned 404 for /diag/function-stage'
             exit 1
           fi
