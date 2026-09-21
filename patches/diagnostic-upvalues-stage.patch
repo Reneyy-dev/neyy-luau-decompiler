@@ -1,0 +1,51 @@
+diff --git a/cfg/src/ssa/construct.rs b/cfg/src/ssa/construct.rs
+--- a/cfg/src/ssa/construct.rs
++++ b/cfg/src/ssa/construct.rs
+@@ -764,7 +764,43 @@ impl<'a> SsaConstructor<'a> {
+             return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_apply1".to_string();
+         }
+ 
+-        self.mark_upvalues();
++        let upvalues_open = UpvaluesOpen::new(self.function, self.old_locals.clone());
++        if stage == "construct_upvalues_new" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_upvalues_new".to_string();
++        }
++
++        for &node in &self.dfs {
++            for stat_index in 0..self.function.block(node).unwrap().len() {
++                let statement = self.function.block(node).unwrap().get(stat_index).unwrap();
++                let values = statement.values().into_iter().cloned().collect::<Vec<_>>();
++                for value in values {
++                    let old_local = &self.old_locals[&value];
++                    if let Some(open_locations) = upvalues_open
++                        .open
++                        .get(&node)
++                        .and_then(|m| m.get(old_local))
++                        .and_then(|m| m.get(&stat_index))
++                    {
++                        if let Some(new_upvalues_in) = self.new_upvalues_in.get_mut(old_local) {
++                            assert!(new_upvalues_in.contains(&value));
++                        } else {
++                            self.upvalues_passed
++                                .entry(old_local.clone())
++                                .or_default()
++                                .entry(*open_locations.first().unwrap())
++                                .or_default()
++                                .insert(value);
++                        }
++                    }
++                }
++            }
++            self.function
++                .block_mut(node)
++                .unwrap()
++                .retain(|statement| !matches!(statement, ast::Statement::Close(_)));
++        }
++
++        if stage == "construct_upvalues_scan" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_upvalues_scan".to_string();
++        }
++
+         if stage == "construct_upvalues" {
+             return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_upvalues".to_string();
+         }
