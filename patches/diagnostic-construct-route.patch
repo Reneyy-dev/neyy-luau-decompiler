@@ -16,15 +16,3 @@ diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
      let (local_count, local_groups, upvalue_in_groups, upvalue_passed_groups) =
          cfg::ssa::construct(&mut function, &upvalues_in);
  
-diff --git a/luau-worker/src/lib.rs b/luau-worker/src/lib.rs
---- a/luau-worker/src/lib.rs
-+++ b/luau-worker/src/lib.rs
-@@ -126,7 +126,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Response> {
-     console_error_panic_hook::set_once();
- 
-     Router::new()
--        .get("/health", |_req, _ctx| Response::ok("neyy-luau-decompiler function-stage-marker-v14"))
-+        .get("/health", |_req, _ctx| Response::ok("neyy-luau-decompiler construct-stage-marker-v15"))
-         .post_async("/diag/strings", |req, _ctx| async move {
-             let bytecode = body_bytes(req).await?;
-             match parse_prefix(&bytecode, false, false) {
