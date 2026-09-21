@@ -36,6 +36,8 @@ jobs:
           git apply --recount patches/constant-tag8.patch
           git apply --check --recount patches/diagnostic-minigame-hang.patch
           git apply --recount patches/diagnostic-minigame-hang.patch
+          git apply --check --recount patches/diagnostic-function-stage.patch
+          git apply --recount patches/diagnostic-function-stage.patch
 
       - name: Verify luau-lifter still compiles and tests
         run: cargo test -p luau-lifter -- --nocapture
