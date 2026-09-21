@@ -46,6 +46,8 @@ jobs:
           git apply --recount patches/diagnostic-upvalues-stage.patch
           git apply --check --recount patches/diagnostic-upvalues-profile.patch
           git apply --recount patches/diagnostic-upvalues-profile.patch
+          git apply --check --recount patches/diagnostic-upvalues-phase.patch
+          git apply --recount patches/diagnostic-upvalues-phase.patch
 
       - name: Verify luau-lifter still compiles and tests
         run: cargo test -p luau-lifter -- --nocapture
@@ -59,7 +61,7 @@ jobs:
         working-directory: luau-worker
         run: npx --yes wrangler@4.134.0 deploy --name neyy-luau-decompiler-stage-diag
 
-      - name: Smoke-test upvalue-profile diagnostic bundle
+      - name: Smoke-test upvalue-phase diagnostic bundle
         run: |
           set -euo pipefail
           URL='https://neyy-luau-decompiler-stage-diag.apa-kah1337.workers.dev'
@@ -67,20 +69,20 @@ jobs:
 
           health="$(curl -sS "$URL/health")"
           echo "HEALTH=$health"
-          if [ "$health" != "neyy-luau-decompiler upvalues-profile-marker-v17" ]; then
-            echo 'ERROR: Worker did not return the expected upvalues-profile build marker'
+          if [ "$health" != "neyy-luau-decompiler upvalues-phase-marker-v18" ]; then
+            echo 'ERROR: Worker did not return the expected upvalues-phase build marker'
             exit 1
           fi
 
           status="$(curl -sS -o /tmp/function-stage-body.txt -w '%{http_code}' \
-            -X POST "$URL/diag/function-stage?id=173&stage=construct_upvalues_graph" \
+            -X POST "$URL/diag/function-stage?id=173&stage=construct_upvalues_statements" \
             -H 'Content-Type: application/octet-stream' \
             --data-binary '')"
           body="$(cat /tmp/function-stage-body.txt)"
-          echo "UPVALUES_PROFILE_HTTP=$status"
-          echo "UPVALUES_PROFILE_BODY=$body"
+          echo "UPVALUES_PHASE_HTTP=$status"
+          echo "UPVALUES_PHASE_BODY=$body"
 
           if [ "$status" = "404" ]; then
-            echo 'ERROR: Worker returned 404 for upvalue-profile probe route'
+            echo 'ERROR: Worker returned 404 for upvalue-phase probe route'
             exit 1
           fi
