@@ -1,0 +1,165 @@
+diff --git a/cfg/src/ssa/upvalues.rs b/cfg/src/ssa/upvalues.rs
+--- a/cfg/src/ssa/upvalues.rs
++++ b/cfg/src/ssa/upvalues.rs
+@@ -140,6 +140,120 @@ impl UpvaluesOpen {
+         )
+     }
++
++    pub fn diagnose_phase(
++        function: &Function,
++        old_locals: FxHashMap<ast::RcLocal, ast::RcLocal>,
++        stage: &str,
++    ) -> String {
++        let do_collect = stage != "construct_upvalues_statements";
++        let do_propagate = stage == "construct_upvalues_propagate";
++
++        let mut this = Self {
++            open: Default::default(),
++            old_locals,
++        };
++        let entry = function.entry().unwrap();
++        let mut stack = vec![entry];
++        let mut visited = FxHashSet::default();
++        let mut pops = 0usize;
++        let mut pushes = 1usize;
++        let mut duplicate_pops = 0usize;
++        let mut open_events = 0usize;
++        let mut close_events = 0usize;
++        let mut collected_ranges = 0usize;
++        let mut propagated_ranges = 0usize;
++        let node_count = function.graph().node_count();
++        let limit = node_count.saturating_mul(16).max(512);
++
++        while let Some(node) = stack.pop() {
++            pops += 1;
++            if pops > limit {
++                return format!(
++                    "NEY_DIAG_UPVALUES_PHASE_LIMIT stage={} nodes={} pops={} pushes={} unique={} duplicate_pops={} opens={} closes={} collected={} propagated={} limit={}",
++                    stage,
++                    node_count,
++                    pops,
++                    pushes,
++                    visited.len(),
++                    duplicate_pops,
++                    open_events,
++                    close_events,
++                    collected_ranges,
++                    propagated_ranges,
++                    limit
++                );
++            }
++
++            if !visited.insert(node) {
++                duplicate_pops += 1;
++            }
++
++            let block = function.block(node).unwrap();
++            let block_opened = this.open.entry(node).or_default();
++            for (stat_index, statement) in block.iter().enumerate() {
++                if let ast::Statement::Assign(assign) = statement {
++                    for opened in assign
++                        .right
++                        .iter()
++                        .filter_map(|r| r.as_closure())
++                        .flat_map(|c| c.upvalues.iter())
++                        .filter_map(|u| match u {
++                            ast::Upvalue::Copy(_) => None,
++                            ast::Upvalue::Ref(l) => Some(l),
++                        })
++                        .map(|l| this.old_locals[l].clone())
++                    {
++                        open_events += 1;
++                        let open_ranges = block_opened.entry(opened).or_default();
++                        let mut open_locations = Vec::new();
++                        if let Some((_prev_range, prev_locations)) =
++                            open_ranges.get_key_value(&stat_index)
++                        {
++                            open_locations.extend(prev_locations);
++                        }
++                        open_locations.push((node, stat_index));
++                        open_ranges.insert(stat_index..=block.len() - 1, open_locations);
++                    }
++                } else if let ast::Statement::Close(close) = statement {
++                    close_events += close.locals.len();
++                    for closed in &close.locals {
++                        if let Some(open_ranges) = block_opened.get_mut(closed) {
++                            open_ranges.remove(stat_index..=block.len() - 1);
++                        }
++                    }
++                }
++            }
++
++            for successor in function.successor_blocks(node) {
++                if !visited.contains(&successor) {
++                    if do_collect {
++                        let successor_block = function.block(successor).unwrap();
++                        let open_at_end = this.open[&node]
++                            .iter()
++                            .filter_map(|(l, m)| {
++                                Some((l.clone(), m.get(&(block.len().saturating_sub(1)))?.clone()))
++                            })
++                            .collect::<Vec<_>>();
++                        collected_ranges += open_at_end.len();
++
++                        if do_propagate {
++                            let successor_open = this.open.entry(successor).or_default();
++                            for (open, mut locations) in open_at_end {
++                                propagated_ranges += 1;
++                                let open_ranges = successor_open.entry(open).or_default();
++                                let range = 0..=successor_block.len().saturating_sub(1);
++                                if let Some((prev_range, prev_locations)) =
++                                    open_ranges.get_key_value(&0)
++                                {
++                                    assert_eq!(prev_range, &range);
++                                    locations.extend(prev_locations);
++                                }
++                                open_ranges.insert(range, locations);
++                            }
++                        }
++                    }
++
++                    stack.push(successor);
++                    pushes += 1;
++                }
++            }
++        }
++
++        format!(
++            "NEY_DIAG_UPVALUES_PHASE_OK stage={} nodes={} pops={} pushes={} unique={} duplicate_pops={} opens={} closes={} collected={} propagated={}",
++            stage,
++            node_count,
++            pops,
++            pushes,
++            visited.len(),
++            duplicate_pops,
++            open_events,
++            close_events,
++            collected_ranges,
++            propagated_ranges
++        )
++    }
+ 
+     pub fn new(function: &Function, old_locals: FxHashMap<ast::RcLocal, ast::RcLocal>) -> Self {
+         let mut this = Self {
+diff --git a/cfg/src/ssa/construct.rs b/cfg/src/ssa/construct.rs
+--- a/cfg/src/ssa/construct.rs
++++ b/cfg/src/ssa/construct.rs
+@@ -775,6 +775,17 @@ impl<'a> SsaConstructor<'a> {
+             );
+         }
++
++        if matches!(
++            stage,
++            "construct_upvalues_statements"
++                | "construct_upvalues_collect"
++                | "construct_upvalues_propagate"
++        ) {
++            return UpvaluesOpen::diagnose_phase(
++                self.function,
++                self.old_locals.clone(),
++                stage,
++            );
++        }
+ 
+         let upvalues_open = UpvaluesOpen::new(self.function, self.old_locals.clone());
+         if stage == "construct_upvalues_new" {
