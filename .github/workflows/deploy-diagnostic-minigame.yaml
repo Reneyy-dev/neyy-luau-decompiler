@@ -50,3 +50,24 @@ jobs:
       - name: Deploy isolated diagnostic Worker
         working-directory: luau-worker
         run: npx --yes wrangler@4.134.0 deploy --name neyy-luau-decompiler-diag
+
+      - name: Smoke-test deployed diagnostic route
+        run: |
+          set -euo pipefail
+          URL='https://neyy-luau-decompiler-diag.apa-kah1337.workers.dev'
+          sleep 5
+          echo '=== health ==='
+          curl -sS -i "$URL/health"
+          echo
+          echo '=== function-stage empty POST ==='
+          status="$(curl -sS -o /tmp/function-stage-body.txt -w '%{http_code}' \
+            -X POST "$URL/diag/function-stage?id=173&stage=lift" \
+            -H 'Content-Type: application/octet-stream' \
+            --data-binary '')"
+          cat /tmp/function-stage-body.txt
+          echo
+          echo "HTTP=$status"
+          if [ "$status" = "404" ]; then
+            echo 'ERROR: deployed Worker still returns 404 for /diag/function-stage'
+            exit 1
+          fi
