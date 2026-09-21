@@ -1,0 +1,175 @@
+diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
+--- a/luau-lifter/src/lib.rs
++++ b/luau-lifter/src/lib.rs
+@@ -148,6 +148,151 @@ pub fn diagnose_decompile_prefix(bytecode: &[u8], encode_key: u8, limit: usize) -> String {
+     )
+ }
+ 
++pub fn diagnose_function_stage(
++    bytecode: &[u8],
++    encode_key: u8,
++    function_id: usize,
++    stage: &str,
++) -> String {
++    use std::panic::{catch_unwind, AssertUnwindSafe};
++
++    match catch_unwind(AssertUnwindSafe(|| {
++        diagnose_function_stage_inner(bytecode, encode_key, function_id, stage)
++    })) {
++        Ok(result) => result,
++        Err(_) => format!(
++            "NEY_DIAG_FUNCTION_STAGE_PANIC function_id={} stage={}",
++            function_id, stage
++        ),
++    }
++}
++
++fn diagnose_function_stage_inner(
++    bytecode: &[u8],
++    encode_key: u8,
++    function_id: usize,
++    stage: &str,
++) -> String {
++    let chunk = match deserializer::deserialize(bytecode, encode_key) {
++        Err(error) => return format!("NEY_DIAG_STAGE_DESERIALIZE_ERR {:?}", error),
++        Ok(Bytecode::Error(message)) => {
++            return format!("NEY_DIAG_STAGE_BYTECODE_ERROR {}", message)
++        }
++        Ok(Bytecode::Chunk(chunk)) => chunk,
++    };
++
++    if function_id >= chunk.functions.len() {
++        return format!(
++            "NEY_DIAG_STAGE_BAD_FUNCTION function_id={} functions={}",
++            function_id,
++            chunk.functions.len()
++        );
++    }
++
++    let ast_function = Arc::<Mutex<ast::Function>>::default();
++    let (mut function, upvalues_in, _child_functions) =
++        Lifter::lift(&chunk.functions, &chunk.string_table, function_id);
++
++    if stage == "lift" {
++        return format!("NEY_DIAG_STAGE_OK function_id={} stage=lift", function_id);
++    }
++
++    let (local_count, local_groups, upvalue_in_groups, upvalue_passed_groups) =
++        cfg::ssa::construct(&mut function, &upvalues_in);
++
++    if stage == "construct" {
++        return format!("NEY_DIAG_STAGE_OK function_id={} stage=construct", function_id);
++    }
++
++    let upvalue_to_group = upvalue_in_groups
++        .into_iter()
++        .chain(
++            upvalue_passed_groups
++                .into_iter()
++                .map(|m| (ast::RcLocal::default(), m)),
++        )
++        .flat_map(|(i, g)| g.into_iter().map(move |u| (u, i.clone())))
++        .collect::<IndexMap<_, _>>();
++    let local_to_group = local_groups
++        .into_iter()
++        .enumerate()
++        .flat_map(|(i, g)| g.into_iter().map(move |l| (l, i)))
++        .collect::<FxHashMap<_, _>>();
++
++    if stage == "maps" {
++        return format!("NEY_DIAG_STAGE_OK function_id={} stage=maps", function_id);
++    }
++
++    let mut changed = true;
++    let mut iterations = 0usize;
++    while changed {
++        iterations += 1;
++        if iterations > 32 {
++            return format!(
++                "NEY_DIAG_STAGE_NONCONVERGE function_id={} stage=loop iterations={}",
++                function_id, iterations
++            );
++        }
++
++        changed = false;
++
++        let dominators = simple_fast(function.graph(), function.entry().unwrap());
++        if stage == "dominators" && iterations == 1 {
++            return format!("NEY_DIAG_STAGE_OK function_id={} stage=dominators", function_id);
++        }
++
++        changed |= structure_jumps(&mut function, &dominators);
++        if stage == "jumps" && iterations == 1 {
++            return format!("NEY_DIAG_STAGE_OK function_id={} stage=jumps", function_id);
++        }
++
++        ssa::inline::inline(&mut function, &local_to_group, &upvalue_to_group);
++        if stage == "inline" && iterations == 1 {
++            return format!("NEY_DIAG_STAGE_OK function_id={} stage=inline", function_id);
++        }
++
++        if structure_conditionals(&mut function) {
++            changed = true;
++        }
++        if stage == "conditionals" && iterations == 1 {
++            return format!("NEY_DIAG_STAGE_OK function_id={} stage=conditionals", function_id);
++        }
++
++        let mut local_map = FxHashMap::default();
++        if ssa::construct::remove_unnecessary_params(&mut function, &mut local_map) {
++            changed = true;
++        }
++        ssa::construct::apply_local_map(&mut function, local_map);
++        if stage == "params" && iterations == 1 {
++            return format!("NEY_DIAG_STAGE_OK function_id={} stage=params", function_id);
++        }
++    }
++
++    if stage == "loop" {
++        return format!(
++            "NEY_DIAG_STAGE_OK function_id={} stage=loop iterations={}",
++            function_id, iterations
++        );
++    }
++
++    ssa::Destructor::new(
++        &mut function,
++        upvalue_to_group,
++        upvalues_in.iter().cloned().collect(),
++        local_count,
++    )
++    .destruct();
++
++    if stage == "destructor" {
++        return format!("NEY_DIAG_STAGE_OK function_id={} stage=destructor", function_id);
++    }
++
++    let params = std::mem::take(&mut function.parameters);
++    let is_variadic = function.is_variadic;
++    let block = Arc::new(restructure::lift(function).into());
++
++    if stage == "restructure" {
++        return format!("NEY_DIAG_STAGE_OK function_id={} stage=restructure", function_id);
++    }
++
++    LocalDeclarer::default().declare_locals(
++        Arc::clone(&block),
++        &upvalues_in.iter().chain(params.iter()).cloned().collect(),
++    );
++
++    if stage == "locals" {
++        return format!("NEY_DIAG_STAGE_OK function_id={} stage=locals", function_id);
++    }
++
++    {
++        let mut ast_function = ast_function.lock();
++        ast_function.body = Arc::try_unwrap(block).unwrap().into_inner();
++        ast_function.parameters = params;
++        ast_function.is_variadic = is_variadic;
++    }
++
++    format!("NEY_DIAG_STAGE_OK function_id={} stage=assign", function_id)
++}
++
+ pub fn decompile_bytecode(bytecode: &[u8], encode_key: u8) -> String {
+     let chunk = deserializer::deserialize(bytecode, encode_key).unwrap();
