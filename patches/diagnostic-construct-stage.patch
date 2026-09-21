@@ -1,0 +1,201 @@
+diff --git a/cfg/src/ssa/construct.rs b/cfg/src/ssa/construct.rs
+--- a/cfg/src/ssa/construct.rs
++++ b/cfg/src/ssa/construct.rs
+@@ -668,3 +668,168 @@ pub fn construct(
+     }
+     .construct()
+ }
++
++impl<'a> SsaConstructor<'a> {
++    fn construct_diagnostic(mut self, stage: &str) -> String {
++        let entry = self.function.entry().unwrap();
++        let mut visited_nodes = Vec::with_capacity(self.function.graph().node_count());
++        for i in 0..self.dfs.len() {
++            let node = self.dfs[i];
++            visited_nodes.push(node);
++            for stat_index in 0..self.function.block(node).unwrap().len() {
++                let statement = self
++                    .function
++                    .block_mut(node)
++                    .unwrap()
++                    .get_mut(stat_index)
++                    .unwrap();
++                if let Some(assign) = statement.as_assign()
++                    && assign.left.len() == 1
++                    && assign.right.len() == 1
++                    && let Some(local) = assign.left[0].as_local().cloned()
++                    && assign.right[0].as_closure().is_some()
++                {
++                    let new_local = RcLocal::default();
++                    self.old_locals.insert(new_local.clone(), local.clone());
++                    if let Some(upvalues) = self.new_upvalues_in.get_mut(&local) {
++                        upvalues.insert(new_local.clone());
++                    }
++                    self.local_count += 1;
++                    self.write_local(node, &local, &new_local);
++                    let statement = self
++                        .function
++                        .block_mut(node)
++                        .unwrap()
++                        .get_mut(stat_index)
++                        .unwrap();
++                    let assign = statement.as_assign_mut().unwrap();
++                    *assign.left[0].as_local_mut().unwrap() = new_local.clone();
++                    self.read(node, stat_index);
++                } else {
++                    let written = statement
++                        .values_written()
++                        .into_iter()
++                        .cloned()
++                        .collect::<Vec<_>>();
++                    self.read(node, stat_index);
++                    for (local_index, local) in written.iter().enumerate() {
++                        let new_local = RcLocal::default();
++                        self.old_locals.insert(new_local.clone(), local.clone());
++                        if let Some(upvalues) = self.new_upvalues_in.get_mut(local) {
++                            upvalues.insert(new_local.clone());
++                        }
++                        self.local_count += 1;
++                        self.write_local(node, local, &new_local);
++                        let statement = self
++                            .function
++                            .block_mut(node)
++                            .unwrap()
++                            .get_mut(stat_index)
++                            .unwrap();
++                        *statement.values_written_mut()[local_index] = new_local;
++                    }
++                }
++            }
++            self.filled_blocks.insert(node);
++
++            for &node in &visited_nodes {
++                if node != entry
++                    && !self.sealed_blocks.contains(&node)
++                    && !self
++                        .function
++                        .predecessor_blocks(node)
++                        .any(|p| !self.filled_blocks.contains(&p))
++                {
++                    if let Some(incomplete_params) = self.incomplete_params.remove(&node) {
++                        for (local, param_local) in incomplete_params {
++                            if !self.new_upvalues_in.contains_key(&local) {
++                                self.add_param_args(node, &local, param_local);
++                            }
++                        }
++                    }
++                    self.sealed_blocks.insert(node);
++                }
++            }
++        }
++
++        if stage == "construct_walkseal" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_walkseal".to_string();
++        }
++
++        if let Some(mut incomplete_params) = self.incomplete_params.remove(&entry) {
++            for param in &mut self.function.parameters {
++                *param = incomplete_params.remove(param).unwrap_or_default();
++            }
++        }
++        assert!(self.incomplete_params.is_empty());
++
++        if stage == "construct_entry" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_entry".to_string();
++        }
++
++        apply_local_map(self.function, std::mem::take(&mut self.local_map));
++        if stage == "construct_apply1" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_apply1".to_string();
++        }
++
++        self.mark_upvalues();
++        if stage == "construct_upvalues" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_upvalues".to_string();
++        }
++
++        self.propagate_copies();
++        if stage == "construct_copies" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_copies".to_string();
++        }
++
++        apply_local_map(self.function, std::mem::take(&mut self.local_map));
++        if stage == "construct_apply2" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_apply2".to_string();
++        }
++
++        remove_unnecessary_params(self.function, &mut self.local_map);
++        if stage == "construct_remove_params" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_remove_params".to_string();
++        }
++
++        apply_local_map(self.function, std::mem::take(&mut self.local_map));
++        if stage == "construct_apply3" {
++            return "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_apply3".to_string();
++        }
++
++        "NEY_DIAG_CONSTRUCT_STAGE_OK stage=construct_complete".to_string()
++    }
++}
++
++pub fn diagnose_construct_stage(
++    function: &mut Function,
++    upvalues_in: &Vec<RcLocal>,
++    stage: &str,
++) -> String {
++    assert!(function
++        .predecessor_blocks(function.entry().unwrap())
++        .next()
++        .is_none());
++
++    let mut new_upvalues_in = IndexMap::with_capacity(upvalues_in.len());
++    for upvalue in upvalues_in {
++        new_upvalues_in.insert(upvalue.clone(), FxHashSet::default());
++    }
++
++    let dfs = Dfs::new(function.graph(), function.entry().unwrap())
++        .iter(function.graph())
++        .collect::<IndexSet<_>>();
++
++    for node in function.blocks().map(|(n, _)| n).collect::<Vec<_>>() {
++        if !dfs.contains(&node) {
++            function.remove_block(node);
++        }
++    }
++
++    let node_count = function.graph().node_count();
++    SsaConstructor {
++        function,
++        dfs,
++        incomplete_params: FxHashMap::with_capacity_and_hasher(node_count, Default::default()),
++        filled_blocks: FxHashSet::with_capacity_and_hasher(node_count, Default::default()),
++        sealed_blocks: FxHashSet::with_capacity_and_hasher(node_count, Default::default()),
++        current_definition: FxHashMap::default(),
++        all_definitions: FxHashMap::default(),
++        old_locals: FxHashMap::default(),
++        local_count: 0,
++        local_map: FxHashMap::default(),
++        new_upvalues_in,
++        upvalues_passed: FxHashMap::default(),
++    }
++    .construct_diagnostic(stage)
++}
++
++diff --git a/luau-lifter/src/lib.rs b/luau-lifter/src/lib.rs
++--- a/luau-lifter/src/lib.rs
+++++ b/luau-lifter/src/lib.rs
++@@ -194,6 +194,13 @@ fn diagnose_function_stage_inner(
++         return format!("NEY_DIAG_STAGE_OK function_id={} stage=lift", function_id);
++     }
++ 
+++    if stage.starts_with("construct_") {
+++        return cfg::ssa::construct::diagnose_construct_stage(
+++            &mut function,
+++            &upvalues_in,
+++            stage,
+++        );
+++    }
+++
++     let (local_count, local_groups, upvalue_in_groups, upvalue_passed_groups) =
++         cfg::ssa::construct(&mut function, &upvalues_in);
++ 
