@@ -57,17 +57,17 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Deploy fresh isolated stage diagnostic Worker
+      - name: Deploy v18 to fresh isolated diagnostic Worker
         working-directory: luau-worker
-        run: npx --yes wrangler@4.134.0 deploy --name neyy-luau-decompiler-stage-diag
+        run: npx --yes wrangler@4.134.0 deploy --name neyy-luau-decompiler-upvalues-v18-diag
 
       - name: Smoke-test upvalue-phase diagnostic bundle
         run: |
           set -euo pipefail
-          URL='https://neyy-luau-decompiler-stage-diag.apa-kah1337.workers.dev'
+          URL='https://neyy-luau-decompiler-upvalues-v18-diag.apa-kah1337.workers.dev'
           sleep 5
 
-          health="$(curl -sS "$URL/health")"
+          health="$(curl -sS -H 'Cache-Control: no-cache' "$URL/health?ci=${GITHUB_RUN_ID}")"
           echo "HEALTH=$health"
           if [ "$health" != "neyy-luau-decompiler upvalues-phase-marker-v18" ]; then
             echo 'ERROR: Worker did not return the expected upvalues-phase build marker'
@@ -75,8 +75,9 @@ jobs:
           fi
 
           status="$(curl -sS -o /tmp/function-stage-body.txt -w '%{http_code}' \
-            -X POST "$URL/diag/function-stage?id=173&stage=construct_upvalues_statements" \
+            -X POST "$URL/diag/function-stage?id=173&stage=construct_upvalues_statements&ci=${GITHUB_RUN_ID}" \
             -H 'Content-Type: application/octet-stream' \
+            -H 'Cache-Control: no-cache' \
             --data-binary '')"
           body="$(cat /tmp/function-stage-body.txt)"
           echo "UPVALUES_PHASE_HTTP=$status"
